@@ -1,0 +1,36 @@
+# Build outputs
+build/bin/
+frontend/dist/
+
+# Dependencies
+frontend/node_modules/
+vendor/
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+*.test
+*.out
+
+# IDE
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# Wails dev
+frontend/bindings/
+frontend/wailsjs/
+
+# Environment
+.env
+.env.local
