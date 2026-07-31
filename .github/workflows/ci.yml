@@ -1,0 +1,291 @@
+# Continuous integration gate for ComputerPruner.
+#
+# The gate has five jobs:
+#   lint-go     - gofmt + `go vet` for every shipping target (darwin/arm64,
+#                 windows/amd64, windows/arm64)
+#   test        - `go test ./internal/... -race` with a coverage artifact
+#   govulncheck - reachable-vulnerability scan of the Go dependency tree
+#   frontend    - lockfile install + advisory audit (see the svelte-check note below)
+#   build       - the only job that produces a real binary, on real macOS/Windows runners
+#
+# ComputerPruner targets macOS and Windows only. Linux is never a build target, so the
+# Ubuntu jobs cross-compile/cross-vet rather than building for their own host.
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+# One in-flight run per ref. A new push to a PR cancels the previous run instead of
+# queueing behind it (the macOS/Windows build matrix is the expensive part).
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+# Least privilege: nothing here writes to the repo, publishes packages, or comments on PRs.
+permissions:
+  contents: read
+
+env:
+  # Pinned to the `toolchain` line in go.mod so CI and local builds agree exactly.
+  GO_VERSION: '1.25.12'
+  NODE_VERSION: '22'
+  # Pinned to the same tag release.yml builds with. `@latest` would mean CI
+  # validates a different toolchain than the one that ships, and a future Wails
+  # release whose go.mod requires a newer Go than GO_VERSION would turn CI red
+  # with no change to this repo.
+  WAILS_VERSION: 'v2.13.0'
+  # Pinned for the same reason. x/vuln bumps its minimum Go regularly.
+  GOVULNCHECK_VERSION: 'v1.1.4'
+
+jobs:
+  lint-go:
+    name: Lint (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          # setup-go's built-in module + build cache, keyed on go.sum.
+          cache: true
+
+      # `gofmt -l` lists unformatted files but still exits 0, so a bare `gofmt -l .`
+      # would silently pass. Capture the output and fail on any non-empty result.
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "::error::These files are not gofmt-formatted. Run 'gofmt -w .':"
+            echo "$unformatted"
+            exit 1
+          fi
+          echo "All Go files are gofmt-clean."
+
+      # main.go carries `//go:embed all:frontend/dist`, and frontend/dist is a build
+      # product that .gitignore excludes. On a clean checkout the directory does not
+      # exist, so ANY command that loads the root package -- `go vet ./...` included --
+      # dies with "pattern all:frontend/dist: no matching files found" before it looks
+      # at a single line of Go. Seed a throwaway placeholder; the real bundle is only
+      # ever produced by the `build` job, which runs `wails build`.
+      - name: Seed frontend/dist placeholder for //go:embed
+        run: |
+          mkdir -p frontend/dist
+          [ -f frontend/dist/index.html ] || \
+            printf '<!doctype html><html><body></body></html>\n' > frontend/dist/index.html
+
+      # Vet both shipping platforms. Much of internal/platform and internal/volume is
+      # behind build tags, so a single-GOOS vet would leave half the tree unchecked.
+      # Linux vet is deliberately omitted: it is not a supported target.
+      - name: go vet (darwin/arm64)
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+        run: go vet ./...
+
+      - name: go vet (windows/amd64)
+        env:
+          GOOS: windows
+          GOARCH: amd64
+        run: go vet ./...
+
+      # windows/arm64 is a GoReleaser release target too, and the syscall-level
+      # code in internal/platform and internal/volume can compile on amd64 while
+      # failing on arm64, so it gets its own vet rather than riding on amd64's.
+      - name: go vet (windows/arm64)
+        env:
+          GOOS: windows
+          GOARCH: arm64
+        run: go vet ./...
+
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # Only ./internal/... is tested: the root package is Wails wiring that needs a
+      # windowing system. -race is what catches the scanner's concurrent tree writes.
+      - name: go test
+        run: go test ./internal/... -race -coverprofile=coverage.out
+
+      # Coverage is uploaded as a plain artifact rather than pushed to Codecov: there is
+      # no token to hand out, and a token-less uploader turns every fork PR red.
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage
+          path: coverage.out
+          retention-days: 7
+          if-no-files-found: error
+
+  govulncheck:
+    name: Vulnerability scan (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@${{ env.GOVULNCHECK_VERSION }}
+
+      # See the same step in lint-go: `govulncheck ./...` loads the root package, which
+      # cannot be loaded without frontend/dist existing.
+      - name: Seed frontend/dist placeholder for //go:embed
+        run: |
+          mkdir -p frontend/dist
+          [ -f frontend/dist/index.html ] || \
+            printf '<!doctype html><html><body></body></html>\n' > frontend/dist/index.html
+
+      # govulncheck does call-graph reachability analysis, so it only reports advisories
+      # that our code can actually reach. It exits non-zero on findings, which fails the
+      # job on purpose. GOOS=darwin is set so the darwin-tagged platform code is analysed.
+      - name: Run govulncheck (GOOS=darwin)
+        env:
+          GOOS: darwin
+          GOARCH: arm64
+        run: govulncheck ./...
+
+  frontend:
+    name: Frontend
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: npm ci
+        working-directory: ./frontend
+        run: npm ci
+
+      # NON-BLOCKING on purpose. Everything in the tree today is a devDependency advisory
+      # (the Svelte 4 SSR XSS chain), and ComputerPruner never server-side-renders: the
+      # bundle is compiled at build time and served from Go's embedded FS. The only "fix"
+      # npm offers is a breaking bump to Svelte 5. So we surface the advisories as an
+      # annotation and let a human triage them, rather than blocking every unrelated PR.
+      # --audit-level=moderate, not high: every live advisory in the tree is
+      # *moderate*, so `--audit-level=high` exits 0 and the annotation this step
+      # exists to produce never appears.
+      - name: npm audit (advisory only)
+        working-directory: ./frontend
+        run: npm audit --audit-level=moderate
+        continue-on-error: true
+
+      # svelte-check is deliberately NOT run here.
+      #
+      # frontend/src/lib/utils/wailsBindings.ts imports from ../../../wailsjs/..., which
+      # the Wails CLI generates from the Go service structs and which .gitignore excludes.
+      # On a clean checkout svelte-check therefore fails with 6 "Cannot find module" errors
+      # that say nothing about the actual change under review.
+      #
+      # Generating the bindings needs `wails generate module`, which compiles and runs the
+      # app in bindings mode -- on Linux that drags in CGO plus GTK3/WebKit2GTK system
+      # packages for a platform we do not even ship. Rather than maintain that apt dance,
+      # the real typecheck runs in the `build` job below, on macOS and Windows, right after
+      # the bindings are generated. `npm run check` is a required gate there, not skipped.
+      - name: Typecheck note
+        run: echo "svelte-check runs in the 'build' job, after 'wails generate module'."
+
+  build:
+    name: Build (${{ matrix.label }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      # Don't let a macOS failure hide a Windows-only regression, or vice versa.
+      fail-fast: false
+      matrix:
+        include:
+          - os: macos-latest
+            label: macOS universal
+            platform: darwin/universal
+            artifact: computer-pruner-macos-universal
+          - os: windows-latest
+            label: Windows amd64
+            platform: windows/amd64
+            artifact: computer-pruner-windows-amd64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      # Diagnostic only -- prints the detected toolchain, WebView2/Xcode status and so on.
+      # NON-BLOCKING: `wails doctor` reports optional/cosmetic gaps (e.g. UPX or NSIS not
+      # installed) with a non-zero exit, and we do not use those. The build step below is
+      # the real signal; doctor's output is just there to debug runner-image drift.
+      - name: wails doctor
+        run: wails doctor
+        continue-on-error: true
+
+      - name: npm ci
+        working-directory: ./frontend
+        run: npm ci
+
+      # `wails generate module` shells out to `go build -tags bindings` on the ROOT
+      # package, so it hits the same `//go:embed all:frontend/dist` wall as lint-go and
+      # govulncheck -- and unlike `wails build` (which calls CreateEmbedDirectories
+      # first) it does NOT create the directory for itself. Without this step the job
+      # dies on a clean checkout with:
+      #   main.go:17:12: pattern all:frontend/dist: no matching files found
+      # `wails build` below overwrites this placeholder: vite is configured with
+      # emptyOutDir: true, so the real bundle is what actually gets embedded.
+      - name: Seed frontend/dist placeholder for //go:embed
+        shell: bash
+        run: |
+          mkdir -p frontend/dist
+          [ -f frontend/dist/index.html ] || \
+            printf '<!doctype html><html><body></body></html>\n' > frontend/dist/index.html
+
+      # Regenerates frontend/wailsjs from the Go service structs. This is what makes
+      # svelte-check meaningful -- and it also catches Go/TS drift, because a renamed or
+      # removed exported service method makes the typecheck below fail.
+      - name: Generate Wails bindings
+        run: wails generate module
+
+      - name: svelte-check
+        working-directory: ./frontend
+        run: npm run check
+
+      # The only place a real binary is produced. Unsigned and un-notarized by design:
+      # no certificates live in this repo, and releases are distributed as-is for now.
+      - name: wails build
+        run: wails build -platform ${{ matrix.platform }} -clean
+
+      # Short retention: these are throwaway CI builds for smoke-testing a PR, not
+      # releases. GoReleaser owns real artifacts. Note that the macOS .app is zipped by
+      # upload-artifact, which drops POSIX exec bits -- fine for inspection, not for
+      # double-click distribution.
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: build/bin/
+          retention-days: 7
+          if-no-files-found: error

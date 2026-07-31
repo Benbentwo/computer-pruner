@@ -1,0 +1,240 @@
+# Tagged release pipeline for ComputerPruner.
+#
+# Wails cannot cross-compile, so this workflow is deliberately split in two:
+#
+#   build    (matrix, native runners)  produces the real artifacts
+#            macos-latest    -> computer-pruner.app  (universal: amd64 + arm64)
+#            windows-latest  -> computer-pruner.exe  (amd64)
+#            windows-latest  -> computer-pruner.exe  (arm64, cross-built)
+#
+#   release  (ubuntu)                  packages and publishes
+#            downloads every matrix artifact, stages them under dist-prebuilt/,
+#            and hands them to GoReleaser, which zips, checksums and publishes.
+#
+# GoReleaser compiles nothing here. See the long header comment in
+# /.goreleaser.yaml for why there is no normal `builds:` block.
+#
+# Release notes come from Release Drafter (see release-drafter.yml), not from
+# GoReleaser. Tag exactly the version Release Drafter resolved on its draft
+# (`v$RESOLVED_VERSION`) or the published release body will be empty.
+#
+# To cut a release:
+#   git tag -a v1.2.3 -m 'v1.2.3' && git push origin v1.2.3
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+# Least privilege. Only the final job needs to write anything, and all it writes
+# is the GitHub Release; the build matrix runs read-only. No packages:write, no
+# id-token:write -- nothing is published anywhere but GitHub Releases, and the
+# artifacts are unsigned.
+permissions:
+  contents: read
+
+# Never let two tags race for the same release.
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+env:
+  # Pinned to the `toolchain` line in go.mod, matching ci.yml.
+  GO_VERSION: '1.25.12'
+  NODE_VERSION: '22'
+  # Pinned to the wails runtime version in go.mod. Releases must be
+  # reproducible, so this is a hard pin rather than @latest.
+  WAILS_VERSION: 'v2.13.0'
+
+jobs:
+  build:
+    name: Build ${{ matrix.label }}
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    strategy:
+      # A partial release is worse than no release: if any target fails, stop
+      # before the packaging job can publish an incomplete set of platforms.
+      fail-fast: true
+      matrix:
+        include:
+          - os: macos-latest
+            label: macOS (universal)
+            platform: darwin/universal
+            artifact: prebuilt-darwin-universal
+          - os: windows-latest
+            label: Windows (amd64)
+            platform: windows/amd64
+            artifact: prebuilt-windows-amd64
+          # Cross-built from the amd64 runner. Wails on Windows uses the pure-Go
+          # go-webview2 bindings and needs no cgo, so GOARCH=arm64 works from an
+          # amd64 host. If that ever stops being true, move this to a
+          # windows-11-arm runner rather than dropping the target.
+          - os: windows-latest
+            label: Windows (arm64)
+            platform: windows/arm64
+            artifact: prebuilt-windows-arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Wails CLI
+        run: go install github.com/wailsapp/wails/v2/cmd/wails@${{ env.WAILS_VERSION }}
+
+      # `wails build` runs `frontend:install` (npm install) itself, which can
+      # drift from the lockfile. Installing with `npm ci` first pins the tree to
+      # package-lock.json and makes the later npm install a no-op.
+      - name: npm ci
+        working-directory: ./frontend
+        run: npm ci
+
+      # Wails templates CFBundleVersion / CFBundleShortVersionString in
+      # build/darwin/Info.plist from wails.json's info.productVersion, and
+      # synthesises the Windows VERSIONINFO resource from the same struct.
+      # Nothing else injects the tag, so without this step every release ships
+      # a bundle that reports wails.json's checked-in placeholder version in
+      # Finder > Get Info and in the .exe's file properties.
+      - name: Stamp the release version into wails.json
+        shell: bash
+        run: |
+          set -euo pipefail
+          version="${GITHUB_REF_NAME#v}"
+          # Written next to the target, not in $TMPDIR: on the Windows runner
+          # those are on different drives and Git Bash's mv would have to copy.
+          jq --arg v "$version" '.info.productVersion = $v' wails.json > wails.json.tmp
+          mv wails.json.tmp wails.json
+          grep productVersion wails.json
+
+      # Produces build/bin/computer-pruner.app on macOS and
+      # build/bin/computer-pruner.exe on Windows (see wails.json
+      # outputfilename). Unsigned and un-notarized by design for now.
+      - name: wails build
+        run: wails build -platform ${{ matrix.platform }} -clean
+
+      # actions/upload-artifact re-zips whatever it is given and drops POSIX
+      # permission bits in the process, which would strip +x from
+      # Contents/MacOS/computer-pruner and leave users with a .app that will not
+      # launch. Tarring the bundle first keeps the mode bits (and any symlinks)
+      # intact end to end.
+      - name: Stage macOS bundle
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          test -d build/bin/computer-pruner.app
+          mkdir -p staging
+          # COPYFILE_DISABLE=1: macOS bsdtar otherwise archives extended
+          # attributes and resource forks as separate `._`-prefixed members,
+          # which survive extraction on the Linux packaging runner and get
+          # zipped into the release as junk.
+          COPYFILE_DISABLE=1 tar -czf staging/computer-pruner-app.tar.gz -C build/bin computer-pruner.app
+          if tar -tzf staging/computer-pruner-app.tar.gz | grep -q '/\._'; then
+            echo "AppleDouble sidecars leaked into the bundle archive" >&2
+            exit 1
+          fi
+
+      - name: Stage Windows binary
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          test -f build/bin/computer-pruner.exe
+          mkdir -p staging
+          cp build/bin/computer-pruner.exe staging/computer-pruner.exe
+
+      - name: Upload prebuilt artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.artifact }}
+          path: staging/
+          retention-days: 1
+          if-no-files-found: error
+
+  release:
+    name: Package and publish
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      # The only elevated permission in this workflow, and the only one
+      # GoReleaser needs: creating/updating the GitHub Release and uploading
+      # assets to it.
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # GoReleaser derives the version from the tag and needs the full tag
+          # history to do it.
+          fetch-depth: 0
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache: true
+
+      # No `name:` -> downloads every artifact from this run into
+      # artifacts/<artifact-name>/.
+      - name: Download prebuilt artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      # Rearranges the downloads into the exact layout .goreleaser.yaml's
+      # archive `files:` entries point at. Deliberately NOT ./dist -- GoReleaser
+      # wipes dist/ on `--clean` before archiving.
+      - name: Stage prebuilt artifacts for GoReleaser
+        run: |
+          set -euo pipefail
+          mkdir -p dist-prebuilt/darwin_universal \
+                   dist-prebuilt/windows_amd64 \
+                   dist-prebuilt/windows_arm64
+          tar -xzf artifacts/prebuilt-darwin-universal/computer-pruner-app.tar.gz \
+              -C dist-prebuilt/darwin_universal
+          cp artifacts/prebuilt-windows-amd64/computer-pruner.exe dist-prebuilt/windows_amd64/
+          cp artifacts/prebuilt-windows-arm64/computer-pruner.exe dist-prebuilt/windows_arm64/
+
+          # Fail loudly here rather than shipping a broken zip: the exec bit on
+          # the bundle's main executable is the thing most likely to be lost in
+          # transit between jobs.
+          test -x dist-prebuilt/darwin_universal/computer-pruner.app/Contents/MacOS/computer-pruner
+          test -f dist-prebuilt/windows_amd64/computer-pruner.exe
+          test -f dist-prebuilt/windows_arm64/computer-pruner.exe
+          find dist-prebuilt -maxdepth 3 -print
+
+      # .goreleaser.yaml sets `use_existing_draft: true` and
+      # `mode: keep-existing` with the changelog disabled, so the release body
+      # comes entirely from the Release Drafter draft. If no draft exists for
+      # this tag, GoReleaser falls through to CreateRelease with an empty body
+      # and exits 0 — a published, latest-tagged, completely blank release.
+      # Fail here instead, while the tag can still be deleted and re-pushed.
+      - name: Require a Release Drafter draft for this tag
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          set -euo pipefail
+          tag="${GITHUB_REF_NAME}"
+          if ! gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null | grep -qx true; then
+            echo "::error::No draft release exists for tag ${tag}." >&2
+            echo "Release Drafter maintains the draft on every merge to main. Check that" >&2
+            echo "the draft's tag matches this one exactly, then re-push the tag." >&2
+            exit 1
+          fi
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@v6
+        with:
+          distribution: goreleaser
+          version: '~> v2'
+          args: release --clean
+        env:
+          # The default job token is enough: contents:write above covers
+          # creating the release and uploading assets.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

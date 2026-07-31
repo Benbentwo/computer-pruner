@@ -1,13 +1,20 @@
 {
   "$schema": "https://wails.io/schemas/config.v2.json",
-  "name": "diskanalyzer",
-  "outputfilename": "diskanalyzer",
+  "name": "computer-pruner",
+  "outputfilename": "computer-pruner",
   "frontend:install": "npm install",
   "frontend:build": "npm run build",
   "frontend:dev:watcher": "npm run dev",
   "frontend:dev:serverUrl": "auto",
   "author": {
-    "name": "Ben",
+    "name": "Ben Smith",
     "email": "ben.smith.developer@gmail.com"
+  },
+  "info": {
+    "companyName": "Ben Smith",
+    "productName": "ComputerPruner",
+    "productVersion": "0.0.0",
+    "copyright": "Copyright (c) 2026 Ben Smith",
+    "comments": "Cross-platform disk analyzer and cleanup tool"
   }
 }

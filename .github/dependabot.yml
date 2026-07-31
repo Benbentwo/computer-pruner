@@ -1,0 +1,88 @@
+# Dependabot configuration for ComputerPruner.
+#
+# Three ecosystems are watched, all weekly:
+#   gomod          (/)          — Go module dependencies
+#   npm            (/frontend)  — Svelte/TS/D3 frontend dependencies
+#   github-actions (/)          — action versions pinned in .github/workflows
+#
+# Minor and patch bumps are grouped into a single PR per ecosystem to keep review
+# noise down; majors stay ungrouped so each breaking bump gets its own PR and its
+# own CI run.
+#
+# Commit prefixes are "deps" / "deps-dev" so the release-drafter autolabeler can
+# classify these PRs from the title alone.
+version: 2
+
+updates:
+  # ---------------------------------------------------------------------------
+  # Go modules
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: gomod
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    # Only "dependencies" is listed: Dependabot guarantees that label exists, and
+    # it silently drops labels the repo has not created yet. Add finer labels
+    # (go, frontend, ci) here once they exist in the repo's label set.
+    labels:
+      - dependencies
+    commit-message:
+      prefix: deps
+    groups:
+      go-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+
+  # ---------------------------------------------------------------------------
+  # Frontend npm packages
+  # ---------------------------------------------------------------------------
+  # Note: the frontend has no runtime dependencies to speak of — Svelte, Vite and
+  # svelte-check are devDependencies — so most PRs here land with the "deps-dev"
+  # prefix.
+  - package-ecosystem: npm
+    directory: /frontend
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 5
+    labels:
+      - dependencies
+    commit-message:
+      prefix: deps
+      prefix-development: deps-dev
+    groups:
+      npm-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch
+
+  # ---------------------------------------------------------------------------
+  # GitHub Actions
+  # ---------------------------------------------------------------------------
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "06:00"
+      timezone: Etc/UTC
+    open-pull-requests-limit: 3
+    labels:
+      - dependencies
+    commit-message:
+      prefix: deps
+    groups:
+      actions-minor-and-patch:
+        applies-to: version-updates
+        update-types:
+          - minor
+          - patch

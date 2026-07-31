@@ -1,0 +1,84 @@
+# Release Drafter keeps an always-current DRAFT GitHub Release for the next
+# version of ComputerPruner, and labels pull requests so that draft is
+# categorised correctly.
+#
+# Division of labour with .goreleaser.yaml (do not change one half in isolation):
+#
+#   Release Drafter  owns the release NOTES. Every merge to main regenerates the
+#                    draft body from merged PR titles, grouped by label.
+#   GoReleaser       owns the BINARIES. On `git push origin vX.Y.Z` it adopts
+#                    that draft (release.use_existing_draft + mode:
+#                    keep-existing), attaches the zips and checksums, and
+#                    publishes it. GoReleaser's own changelog is disabled.
+#
+# So: merge PRs -> watch the draft accumulate -> when it reads right, tag the
+# exact version shown on the draft (`v$RESOLVED_VERSION`) and the release ships.
+#
+# Release Drafter v7 split the two halves into two separate actions --
+# `release-drafter@v7` drafts, `release-drafter/autolabeler@v7` labels -- which
+# is why there are two jobs below instead of the v6-era single step with
+# `disable-releaser` / `disable-autolabeler` inputs (those inputs no longer
+# exist).
+#
+# Config for both jobs lives in .github/release-drafter.yml.
+name: Release Drafter
+
+on:
+  push:
+    branches: [main]
+  # Needed for the autolabeler: a PR has to be re-evaluated when it is opened,
+  # when it is reopened, and on every new push, because the branch name, title
+  # and changed files it matches on can all change.
+  pull_request:
+    types: [opened, reopened, synchronize]
+
+# contents: write      -> create/update the draft release
+# pull-requests: write -> apply autolabels to PRs
+# Nothing else; this workflow never builds or publishes an artifact. Each job
+# below narrows this further to only the half it actually needs.
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: release-drafter-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  update_release_draft:
+    name: Update release draft
+    # Only redraft on merges to main. On a PR there is nothing to add to the
+    # draft yet -- the PR has not been merged.
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: read
+    steps:
+      - uses: release-drafter/release-drafter@v7
+        with:
+          config-name: release-drafter.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  autolabel:
+    name: Autolabel pull request
+    # GITHUB_TOKEN is read-only for pull_request events raised from a fork, so
+    # the autolabeler cannot write labels there and the job would fail on every
+    # external contribution. Skipping is the safe fix: the alternative that
+    # upstream suggests, pull_request_target, runs with a writable token in the
+    # context of the base repo and is a well-known privilege-escalation footgun.
+    # Fork PRs get labelled by a maintainer instead.
+    if: >-
+      github.event_name == 'pull_request' &&
+      github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      pull-requests: write
+    steps:
+      - uses: release-drafter/release-drafter/autolabeler@v7
+        with:
+          config-name: release-drafter.yml
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

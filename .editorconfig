@@ -1,0 +1,52 @@
+# EditorConfig — https://editorconfig.org
+# Keeps whitespace consistent across the Go backend and the Svelte/TS frontend.
+root = true
+
+[*]
+charset = utf-8
+end_of_line = lf
+indent_style = space
+indent_size = 2
+insert_final_newline = true
+trim_trailing_whitespace = true
+
+# Go is gofmt's territory: hard tabs, and gofmt decides the rest.
+[*.go]
+indent_style = tab
+indent_size = 8
+
+[go.mod]
+indent_style = tab
+indent_size = 8
+
+[go.sum]
+indent_style = tab
+indent_size = 8
+
+# Frontend sources.
+[*.{svelte,ts,js,mjs,cjs,json,jsonc,css,html}]
+indent_style = space
+indent_size = 2
+
+# YAML forbids tabs outright.
+[*.{yml,yaml}]
+indent_style = space
+indent_size = 2
+
+# Markdown uses two trailing spaces as a hard line break, so trimming would
+# silently change rendered output.
+[*.md]
+trim_trailing_whitespace = false
+
+# Windows batch files need CRLF to be interpreted reliably.
+[*.{bat,cmd}]
+end_of_line = crlf
+
+# Generated or vendored trees: leave them exactly as the generator wrote them.
+[frontend/wailsjs/**]
+trim_trailing_whitespace = false
+insert_final_newline = false
+
+[frontend/package-lock.json]
+indent_style = space
+indent_size = 2

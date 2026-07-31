@@ -32,6 +32,11 @@ export const breadcrumbs = writable<TreeNode[]>([])
 export const hoveredNode = writable<TreeNode | null>(null)
 
 /**
+ * Currently selected node (clicked)
+ */
+export const selectedNode = writable<TreeNode | null>(null)
+
+/**
  * Items collected for deletion
  */
 export const collectorItems = writable<CollectorItem[]>([])
@@ -45,3 +50,19 @@ export const theme = writable<'light' | 'dark'>('dark')
  * Whether a scan is currently in progress
  */
 export const isScanning = writable<boolean>(false)
+
+/**
+ * Toast notifications queue
+ */
+export interface Notification {
+  id: string
+  type: 'success' | 'error' | 'info'
+  message: string
+}
+
+export const notifications = writable<Notification[]>([])
+
+/**
+ * Last scan error
+ */
+export const scanError = writable<string | null>(null)

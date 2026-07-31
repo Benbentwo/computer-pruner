@@ -1,0 +1,77 @@
+name: Feature request
+description: Suggest a capability or improvement for ComputerPruner.
+title: "[Feature]: "
+labels:
+  - enhancement
+body:
+  - type: markdown
+    attributes:
+      value: |
+        ComputerPruner is planned around four pillars. Only the first is
+        implemented today; the other three are deliberately unbuilt, and
+        requests against them are welcome but will sit in the backlog until
+        that pillar is started.
+
+        | Pillar | Status |
+        | --- | --- |
+        | Disk cleanup / analyzer | Implemented |
+        | Startup app management | Planned, not started |
+        | Hardware / spec inventory | Planned, not started |
+        | Driver validation | Planned, not started |
+
+        As with bug reports: this app displays filesystem trees, so please
+        redact private directory names from any screenshot or example path.
+  - type: dropdown
+    id: pillar
+    attributes:
+      label: Which pillar does this relate to?
+      options:
+        - Disk cleanup / analyzer
+        - Startup app management
+        - Hardware / spec inventory
+        - Driver validation
+        - Cross-cutting (UI, packaging, performance, accessibility)
+        - Not sure
+    validations:
+      required: true
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: >-
+        What are you trying to accomplish, and what gets in the way today?
+        Describe the problem rather than the solution — it keeps the design
+        space open.
+      placeholder: >-
+        When I scan an external drive I cannot tell which folders changed since
+        the previous scan, so I re-inspect the whole tree every time.
+    validations:
+      required: true
+  - type: textarea
+    id: solution
+    attributes:
+      label: Proposed solution
+      description: What you would like ComputerPruner to do.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+      description: >-
+        Other approaches you thought about, other tools that solve this, or why
+        the existing workflow does not suffice.
+    validations:
+      required: false
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: >-
+            This targets macOS and/or Windows (Linux is not a release target).
+          required: false
+        - label: >-
+            I searched existing issues and this does not appear to be a
+            duplicate.
+          required: false

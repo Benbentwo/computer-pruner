@@ -1,18 +1,63 @@
 <script lang="ts">
-  import { theme } from '$lib/stores'
+  import { onMount } from 'svelte'
+  import { theme, isScanning, scanTree, currentRoot } from '$lib/stores'
+  import { initEventBridge } from '$lib/utils/eventBridge'
+  import { startScan, startFolderScan } from '$lib/utils/wailsBindings'
   import DiskSelector from '$lib/components/DiskSelector.svelte'
   import SunburstChart from '$lib/components/SunburstChart.svelte'
   import Sidebar from '$lib/components/Sidebar.svelte'
   import BreadcrumbBar from '$lib/components/BreadcrumbBar.svelte'
   import CollectorPanel from '$lib/components/CollectorPanel.svelte'
   import ScanProgressOverlay from '$lib/components/ScanProgressOverlay.svelte'
-  import { isScanning } from '$lib/stores'
+  import Toast from '$lib/components/Toast.svelte'
 
   let currentView: 'selector' | 'analyzer' = 'selector'
 
-  function handleScan(event: CustomEvent<string>) {
-    currentView = 'analyzer'
-    // TODO: Dispatch scan to backend with mount point
+  onMount(() => {
+    initEventBridge()
+
+    // Listen for scan completion to switch to analyzer view
+    const unsub = scanTree.subscribe(tree => {
+      if (tree) {
+        currentView = 'analyzer'
+      }
+    })
+
+    // Keyboard shortcuts
+    function handleKeydown(e: KeyboardEvent) {
+      if (e.key === 'Escape' && currentView === 'analyzer') {
+        // Could go back one level here
+      }
+    }
+    window.addEventListener('keydown', handleKeydown)
+
+    return () => {
+      unsub()
+      window.removeEventListener('keydown', handleKeydown)
+    }
+  })
+
+  async function handleScan(event: CustomEvent<{path: string, forceRescan: boolean}>) {
+    const { path: mountPoint, forceRescan } = event.detail
+    isScanning.set(true)
+
+    try {
+      // Determine if this is a volume mount point or a folder
+      if (mountPoint === '/' || mountPoint.startsWith('/Volumes/')) {
+        await startScan(mountPoint, forceRescan)
+      } else {
+        await startFolderScan(mountPoint, forceRescan)
+      }
+    } catch (e: any) {
+      isScanning.set(false)
+      console.error('Failed to start scan:', e)
+    }
+  }
+
+  function goBackToSelector() {
+    currentView = 'selector'
+    scanTree.set(null)
+    currentRoot.set(null)
   }
 
   $: {
@@ -30,10 +75,15 @@
       <!-- Top Bar -->
       <header class="top-bar">
         <div class="top-bar-left">
-          <h1>Disk Analyzer</h1>
+          <button class="back-to-selector" on:click={goBackToSelector} title="Back to volume selector">
+            ← Volumes
+          </button>
+        </div>
+        <div class="top-bar-center">
+          <BreadcrumbBar />
         </div>
         <div class="top-bar-right">
-          <BreadcrumbBar />
+          <!-- Placeholder for future controls -->
         </div>
       </header>
 
@@ -48,13 +98,6 @@
         <section class="chart-center">
           <SunburstChart />
         </section>
-
-        <!-- Right Area (placeholder) -->
-        <aside class="sidebar-right">
-          <div class="placeholder-panel">
-            <p class="text-secondary">Details panel</p>
-          </div>
-        </aside>
       </main>
 
       <!-- Bottom Collector Panel -->
@@ -68,6 +111,9 @@
   {#if $isScanning}
     <ScanProgressOverlay />
   {/if}
+
+  <!-- Toast Notifications -->
+  <Toast />
 </div>
 
 <style>
@@ -96,35 +142,57 @@
   }
 
   .top-bar {
-    padding: 1em 1.5em;
+    padding: 0.5em 1em;
     background-color: var(--bg-secondary);
     border-bottom: 1px solid var(--border);
     display: flex;
     justify-content: space-between;
     align-items: center;
     flex-shrink: 0;
+    gap: 1em;
+    -webkit-app-region: drag;
   }
 
   .top-bar-left {
     flex: 0 0 auto;
+    -webkit-app-region: no-drag;
   }
 
-  .top-bar-left h1 {
-    margin: 0;
-    font-size: 1.5em;
+  .back-to-selector {
+    padding: 0.35em 0.75em;
+    background: var(--bg-tertiary);
+    border: 1px solid var(--border);
+    color: var(--text-secondary);
+    border-radius: 6px;
+    cursor: pointer;
+    font-size: 0.8em;
+    font-weight: 500;
+    transition: all 150ms ease;
+  }
+
+  .back-to-selector:hover {
+    background-color: var(--accent);
+    border-color: var(--accent);
+    color: white;
+  }
+
+  .top-bar-center {
+    flex: 1;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    overflow: hidden;
+    -webkit-app-region: no-drag;
   }
 
   .top-bar-right {
-    flex: 1;
-    display: flex;
-    justify-content: flex-end;
-    align-items: center;
+    flex: 0 0 auto;
+    -webkit-app-region: no-drag;
   }
 
   .main-content {
     flex: 1;
     display: flex;
-    gap: 1px;
     overflow: hidden;
     background-color: var(--bg-primary);
   }
@@ -133,7 +201,7 @@
     flex: 0 0 280px;
     background-color: var(--bg-secondary);
     border-right: 1px solid var(--border);
-    overflow-y: auto;
+    overflow: hidden;
     display: flex;
     flex-direction: column;
   }
@@ -145,24 +213,6 @@
     justify-content: center;
     overflow: hidden;
     background-color: var(--bg-primary);
-  }
-
-  .sidebar-right {
-    flex: 0 0 280px;
-    background-color: var(--bg-secondary);
-    border-left: 1px solid var(--border);
-    overflow-y: auto;
-    display: flex;
-    flex-direction: column;
-  }
-
-  .placeholder-panel {
-    padding: 1.5em;
-    flex: 1;
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: var(--text-secondary);
   }
 
   .bottom-panel {

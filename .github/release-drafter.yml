@@ -1,0 +1,255 @@
+# Release Drafter configuration for ComputerPruner.
+#
+# Read by both jobs in .github/workflows/release-drafter.yml (the drafter and
+# the autolabeler share this one file). It owns the release NOTES;
+# .goreleaser.yaml owns the binaries and has its own changelog generation
+# switched off (`changelog: disable: true`) so the two never fight.
+#
+# How the version number is decided: Release Drafter looks at every PR merged
+# since the last release, runs it through the `categories` pipeline below, and
+# takes the highest `semver-increment` that matched. That value is substituted
+# into `name-template`/`tag-template` as $RESOLVED_VERSION.
+#
+# IMPORTANT: when you are ready to ship, tag EXACTLY the version shown on the
+# draft. GoReleaser adopts the existing draft by tag; a mismatch gives you a
+# published release with an empty body.
+#
+# This is written against the Release Drafter v7 schema. v7 replaced the old
+# top-level `version-resolver:` and `exclude-labels:` keys with the unified
+# `categories` pipeline (`type: version-resolver` / `type: pre-exclude`), and
+# moved a category's label matching under `when:`. Do not copy v6 examples in
+# here without translating them.
+#
+# Labels referenced here do not need to be created by hand -- GitHub creates a
+# missing label the first time the API applies it -- but giving them colours and
+# descriptions in the repo's label settings is worth five minutes.
+
+name-template: 'v$RESOLVED_VERSION'
+tag-template: 'v$RESOLVED_VERSION'
+
+categories:
+  # --- filtering -------------------------------------------------------
+  # Runs before everything else: these PRs are invisible to both the changelog
+  # and the version resolver.
+  - type: 'pre-exclude'
+    when:
+      labels:
+        - 'skip-changelog'
+        - 'duplicate'
+        - 'invalid'
+        - 'wontfix'
+        - 'question'
+
+  # --- changelog sections ----------------------------------------------
+  # In v7 a PR can land in several changelog categories at once, so every
+  # section below sets `exclusive: true` to restore first-match-wins. Order is
+  # therefore load-bearing:
+  #   * Breaking changes outrank everything.
+  #   * Security outranks Bug Fixes, so a security fix is never buried in the
+  #     generic fix list.
+  #   * Dependencies outranks Maintenance, so a `chore(deps):` bump lands under
+  #     Dependencies rather than in the general chore bucket.
+  #
+  # `semver-increment` here doubles as the version rule for labelled PRs; the
+  # `version-resolver` entries further down only cover the explicit
+  # major/minor/patch override labels and the unlabelled fallback.
+  - title: '⚠️ Breaking Changes'
+    exclusive: true
+    semver-increment: major
+    when:
+      labels:
+        - 'breaking-change'
+        - 'major'
+
+  - title: '🔒 Security'
+    exclusive: true
+    semver-increment: patch
+    when:
+      labels:
+        - 'security'
+
+  - title: '🚀 Features'
+    exclusive: true
+    semver-increment: minor
+    when:
+      labels:
+        - 'feature'
+        - 'enhancement'
+
+  - title: '🐛 Bug Fixes'
+    exclusive: true
+    semver-increment: patch
+    when:
+      labels:
+        - 'fix'
+        - 'bug'
+
+  - title: '📚 Documentation'
+    exclusive: true
+    semver-increment: patch
+    when:
+      labels:
+        - 'documentation'
+
+  - title: '📦 Dependencies'
+    exclusive: true
+    semver-increment: patch
+    # Dependabot is noisy; fold the list once it gets long.
+    collapse-after: 5
+    when:
+      labels:
+        - 'dependencies'
+
+  - title: '🧰 Maintenance'
+    exclusive: true
+    semver-increment: patch
+    when:
+      labels:
+        - 'maintenance'
+        - 'chore'
+        - 'refactor'
+        - 'ci'
+        - 'test'
+        - 'performance'
+
+  # No `when:` -- the bucket for anything that reached here unlabelled, so a
+  # missing label loses the nice heading but never silently drops the change.
+  - title: '🔀 Other Changes'
+    exclusive: true
+    semver-increment: patch
+
+  # --- version resolution ----------------------------------------------
+  # These render nothing; they only feed $RESOLVED_VERSION. The highest
+  # increment matched anywhere (here or on a changelog category) wins.
+  - type: 'version-resolver'
+    semver-increment: 'major'
+    when:
+      labels:
+        - 'breaking-change'
+        - 'major'
+
+  - type: 'version-resolver'
+    semver-increment: 'minor'
+    when:
+      labels:
+        - 'minor'
+
+  - type: 'version-resolver'
+    semver-increment: 'patch'
+    when:
+      labels:
+        - 'patch'
+
+  # No `when:` -- fallback. An unlabelled PR must never bump the minor version.
+  - type: 'version-resolver'
+    semver-increment: 'patch'
+
+# Maps conventional-commit style branch names, PR titles and touched files onto
+# the labels the categories above key off. Matchers are evaluated independently
+# and every rule that matches applies (this is not first-match), so a `feat/...`
+# branch whose title carries a `!` correctly picks up both `feature` and
+# `breaking-change`.
+#
+# Matchers: `branch`, `title` and `body` take JS regex literals (/…/flags);
+# `files` takes globs.
+autolabeler:
+  # `feat!: …`, `fix(scanner)!: …`, or a body containing BREAKING CHANGE.
+  - label: 'breaking-change'
+    title:
+      - '/^[a-z]+(\([^)]*\))?!:/'
+    body:
+      - '/BREAKING[ -]CHANGE/'
+
+  - label: 'feature'
+    branch:
+      - '/^feat\//'
+      - '/^feature\//'
+    title:
+      - '/^feat(\([^)]*\))?!?:/i'
+
+  - label: 'fix'
+    branch:
+      - '/^fix\//'
+      - '/^bugfix\//'
+      - '/^hotfix\//'
+    title:
+      - '/^fix(\([^)]*\))?!?:/i'
+
+  - label: 'documentation'
+    branch:
+      - '/^docs?\//'
+    title:
+      - '/^docs(\([^)]*\))?!?:/i'
+    files:
+      - 'docs/**'
+      - '*.md'
+
+  # Covers both hand-rolled `deps/` branches and Dependabot's
+  # `dependabot/<ecosystem>/<pkg>` branches with their `build(deps):` titles.
+  - label: 'dependencies'
+    branch:
+      - '/^deps\//'
+      - '/^dependabot\//'
+    title:
+      - '/^(chore|build|fix)\(deps(-dev)?\):/i'
+      - '/^deps:/i'
+    files:
+      - 'go.mod'
+      - 'go.sum'
+      - 'frontend/package.json'
+      - 'frontend/package-lock.json'
+
+  - label: 'security'
+    branch:
+      - '/^sec(urity)?\//'
+    title:
+      - '/^sec(urity)?(\([^)]*\))?!?:/i'
+
+  - label: 'maintenance'
+    branch:
+      - '/^chore\//'
+      - '/^refactor\//'
+      - '/^test\//'
+      - '/^ci\//'
+      - '/^build\//'
+      - '/^style\//'
+      - '/^perf\//'
+    title:
+      - '/^(chore|refactor|test|ci|build|style|perf)(\([^)]*\))?!?:/i'
+
+change-template: '- $TITLE (#$NUMBER) $AUTHORS'
+# Escaping these stops a PR title containing markdown or an @mention from
+# reformatting (or notifying half the org via) the release notes.
+change-title-escapes: '\<*_&@'
+
+no-changes-template: '- No user-facing changes in this release.'
+
+sort-by: title
+sort-direction: ascending
+
+template: |
+  ## What's Changed
+
+  $CHANGES
+
+  ## Downloads
+
+  | Platform | File |
+  | --- | --- |
+  | macOS (Apple Silicon + Intel) | `computer-pruner_$RESOLVED_VERSION_darwin_universal.zip` |
+  | Windows (x64) | `computer-pruner_$RESOLVED_VERSION_windows_amd64.zip` |
+  | Windows (ARM64) | `computer-pruner_$RESOLVED_VERSION_windows_arm64.zip` |
+
+  Verify a download against `computer-pruner_$RESOLVED_VERSION_checksums.txt`:
+
+  ```
+  shasum -a 256 -c computer-pruner_$RESOLVED_VERSION_checksums.txt --ignore-missing
+  ```
+
+  > **These builds are unsigned and un-notarized.**
+  > macOS will refuse to open the app on first launch; right-click the `.app`
+  > and choose *Open*, or run `xattr -dr com.apple.quarantine computer-pruner.app`.
+  > Windows SmartScreen will show a "Windows protected your PC" prompt; choose
+  > *More info* -> *Run anyway*.
+
+  **Full Changelog**: https://github.com/Benbentwo/computer-pruner/compare/$PREVIOUS_TAG...v$RESOLVED_VERSION

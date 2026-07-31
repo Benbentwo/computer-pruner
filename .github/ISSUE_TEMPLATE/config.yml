@@ -1,0 +1,18 @@
+# Issue chooser configuration.
+#
+# Blank issues are disabled so every report arrives through one of the forms —
+# the bug form in particular carries the required "no private paths" privacy
+# acknowledgement, which a blank issue would bypass.
+blank_issues_enabled: false
+
+contact_links:
+  - name: Question or general discussion
+    url: https://github.com/Benbentwo/computer-pruner/discussions
+    about: >-
+      Usage questions, ideas that are not yet a concrete request, and anything
+      open-ended belong in Discussions rather than the issue tracker.
+  - name: Report a security vulnerability
+    url: https://github.com/Benbentwo/computer-pruner/security/advisories/new
+    about: >-
+      Please report vulnerabilities privately via a GitHub security advisory,
+      never as a public issue.

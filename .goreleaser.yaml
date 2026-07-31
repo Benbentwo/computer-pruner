@@ -1,0 +1,255 @@
+# GoReleaser configuration for ComputerPruner.
+#
+# ============================================================================
+# READ THIS FIRST: why there is no normal `builds:` block
+# ============================================================================
+#
+# ComputerPruner is a Wails v2 desktop app, not a plain Go binary.
+#
+#   * `go build` alone does not produce a usable artifact. The Svelte/TS frontend
+#     has to be compiled and embedded, and on macOS the result has to be wrapped
+#     in a `computer-pruner.app` bundle with an Info.plist and an icon.
+#   * Wails cannot cross-compile. A macOS .app must be built on a macOS runner
+#     (it shells out to Xcode's clang and lipo) and a Windows .exe on a Windows
+#     runner. GoReleaser's normal cross-compiling `go` builder therefore cannot
+#     produce anything shippable here.
+#
+# So the pipeline is split in two, in .github/workflows/release.yml:
+#
+#   1. A matrix job builds on NATIVE runners with the Wails CLI:
+#        macos-latest   -> wails build -platform darwin/universal  -> .app bundle
+#        windows-latest -> wails build -platform windows/amd64     -> .exe
+#        windows-latest -> wails build -platform windows/arm64     -> .exe
+#   2. Each matrix job uploads its output as a workflow artifact.
+#   3. A final job downloads all of them, stages them under ./dist-prebuilt/,
+#      and runs GoReleaser. GoReleaser does zero compiling: it only archives,
+#      checksums, and publishes the GitHub Release.
+#
+# GoReleaser has a first-class feature for exactly this -- `builder: prebuilt`.
+# It is GORELEASER PRO ONLY. Running OSS GoReleaser against a config containing
+# a `prebuilt:` key fails hard:
+#
+#     yaml: unmarshal errors:
+#       line N: field prebuilt not found in type config.Build
+#     ... and with the key removed: "invalid builder: prebuilt"
+#
+# ComputerPruner ships free and unsigned; paying for a GoReleaser Pro licence to
+# archive three files is not a reasonable dependency. The OSS equivalent used
+# below is `archives[].meta: true` -- a "meta" archive contains only the entries
+# listed under `files:`, with no GoReleaser-built binaries in it. One meta
+# archive per platform, each pointing at the already-built artifact staged by
+# the workflow, gives byte-for-byte the same result the Pro `prebuilt` builder
+# would: per-platform zips, a sha256 checksum file, and one GitHub Release.
+#
+# Because meta archives are not tied to a build, the sole `builds:` entry below
+# is a no-op whose only job is to stop GoReleaser from inventing a default
+# `go build ./...` for us.
+#
+# If this project ever buys a Pro licence, the equivalent block is:
+#
+#   builds:
+#     - id: computer-pruner
+#       builder: prebuilt
+#       goos: [darwin, windows]
+#       goarch: [amd64, arm64]
+#       goamd64: [v1]
+#       binary: computer-pruner
+#       prebuilt:
+#         path: dist-prebuilt/{{ .Os }}_{{ .Arch }}/computer-pruner
+#
+# ...and the three meta archives collapse back into one normal archive block.
+# Note that the Pro builder deals in single binaries, so the macOS .app bundle
+# would still need special handling.
+#
+# Local sanity check (no macOS/Windows needed, produces fake-but-shaped zips):
+#   goreleaser check
+#   goreleaser release --snapshot --clean --skip=publish
+#
+# ============================================================================
+
+version: 2
+
+project_name: computer-pruner
+
+# `wails build` already ran in the matrix jobs, and the release job never
+# compiles Go. Nothing to do before archiving.
+before:
+  hooks: []
+
+builds:
+  # NOT a real build. GoReleaser synthesises a default `go build` of the main
+  # package when `builds:` is empty, which here would produce a frontend-less,
+  # GUI-less binary on a Linux runner. `skip: true` suppresses that. All actual
+  # artifacts arrive pre-built via the archives below.
+  - id: prebuilt-noop
+    skip: true
+
+archives:
+  # ---------------------------------------------------------------------
+  # macOS: one universal (amd64 + arm64) .app bundle, zipped.
+  #
+  # `dst: computer-pruner.app` re-roots the whole staged directory tree at the
+  # top of the zip, so users get computer-pruner.app/Contents/... and not
+  # dist-prebuilt/darwin_universal/computer-pruner.app/Contents/...
+  #
+  # The zip preserves POSIX permission bits, which is why the workflow ships the
+  # .app between jobs as a tarball: actions/upload-artifact re-zips its input
+  # and drops the +x bit off Contents/MacOS/computer-pruner, which would make
+  # the downloaded .app refuse to launch.
+  #
+  # Meta archives must not template {{ .Os }} / {{ .Arch }} into name_template
+  # (there is no build to resolve them from), hence the literal platform suffix.
+  # ---------------------------------------------------------------------
+  - id: darwin-universal
+    meta: true
+    formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_darwin_universal"
+    wrap_in_directory: false
+    files:
+      - src: dist-prebuilt/darwin_universal/computer-pruner.app
+        dst: computer-pruner.app
+      - LICENSE
+      - README.md
+
+  # ---------------------------------------------------------------------
+  # Windows amd64
+  # ---------------------------------------------------------------------
+  - id: windows-amd64
+    meta: true
+    formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_windows_amd64"
+    wrap_in_directory: false
+    files:
+      - src: dist-prebuilt/windows_amd64/computer-pruner.exe
+        dst: computer-pruner.exe
+      - LICENSE
+      - README.md
+
+  # ---------------------------------------------------------------------
+  # Windows arm64
+  # ---------------------------------------------------------------------
+  - id: windows-arm64
+    meta: true
+    formats: [zip]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_windows_arm64"
+    wrap_in_directory: false
+    files:
+      - src: dist-prebuilt/windows_arm64/computer-pruner.exe
+        dst: computer-pruner.exe
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: "{{ .ProjectName }}_{{ .Version }}_checksums.txt"
+  algorithm: sha256
+
+# ============================================================================
+# CHANGELOG OWNERSHIP -- deliberate choice, do not "fix" one half of this.
+# ============================================================================
+#
+# Release Drafter owns the release notes. GoReleaser owns the binaries.
+#
+# Release Drafter (.github/workflows/release-drafter.yml) keeps a DRAFT GitHub
+# Release permanently up to date on every merge to main, categorised by label.
+# When a maintainer pushes the matching `v*` tag, GoReleaser finds that draft,
+# attaches the zips + checksums, and flips it to published.
+#
+# Both tools can write a release body, so exactly one of them must be told not
+# to. The two settings below are the two halves of that decision:
+#
+#   changelog.disable: true   -> GoReleaser generates no commit-log changelog.
+#   release.mode: keep-existing -> GoReleaser never overwrites the body of a
+#                                 release that already exists (i.e. the draft
+#                                 Release Drafter has been curating).
+#
+# The rejected alternative was `release.mode: replace` with GoReleaser's own
+# changelog: that produces a raw commit list, throws away Release Drafter's
+# categorisation, and makes the drafter workflow pointless. Picking that instead
+# means: set `changelog.disable: false`, drop Release Drafter entirely, and
+# delete .github/release-drafter.yml. Do not run both generators at once.
+#
+# Failure mode to know about: `keep-existing` only preserves notes if the tag
+# you push matches the tag on the draft. Release Drafter tags its draft
+# `v$RESOLVED_VERSION`; tag exactly that, or you get an empty release body.
+# ============================================================================
+changelog:
+  disable: true
+
+release:
+  github:
+    owner: Benbentwo
+    name: computer-pruner
+
+  # Publish immediately on tag push. Release Drafter's draft is the input; the
+  # tagged release is the output, and it goes out live.
+  draft: false
+
+  # Adopt the draft Release Drafter has been maintaining instead of creating a
+  # second, empty release next to it.
+  use_existing_draft: true
+
+  # Keep Release Drafter's curated notes verbatim. See the block above.
+  mode: keep-existing
+
+  # v1.0.0-rc1 / v2.0.0-beta.2 are flagged as pre-releases automatically;
+  # v1.0.0 is not.
+  prerelease: auto
+
+  # Only tag a stable release as "Latest"; an rc must not displace it.
+  make_latest: "{{ not (contains .Tag \"-\") }}"
+
+  # Re-running a failed release job overwrites its half-uploaded artifacts
+  # rather than 422-ing.
+  replace_existing_artifacts: true
+
+# ============================================================================
+# macOS SIGNING + NOTARIZATION -- intentionally OFF.
+# ============================================================================
+#
+# ComputerPruner currently ships UNSIGNED and UN-NOTARIZED. macOS users will get
+# a Gatekeeper warning and must right-click -> Open (or clear the quarantine
+# attribute) on first launch. Document that in the README; do not paper over it.
+#
+# To turn signing on later, add these five GitHub Actions repository secrets
+# (Settings -> Secrets and variables -> Actions -> New repository secret):
+#
+#   1. MACOS_SIGN_P12         Developer ID Application certificate, exported
+#                             from Keychain Access as a .p12 and base64-encoded:
+#                               base64 -i DeveloperID.p12 | pbcopy
+#   2. MACOS_SIGN_PASSWORD    The password set when exporting that .p12.
+#   3. MACOS_NOTARY_ISSUER_ID App Store Connect API issuer ID (a UUID) -- this
+#                             is the "Team ID" side of the notary credentials.
+#   4. MACOS_NOTARY_KEY_ID    App Store Connect API key ID (10 chars).
+#   5. MACOS_NOTARY_KEY       The AuthKey_<KEY_ID>.p8 private key, base64-encoded.
+#
+# (If you would rather use the older Apple ID flow than an API key, secrets 3-5
+# become APPLE_ID, APPLE_TEAM_ID and an app-specific password generated at
+# appleid.apple.com -- GoReleaser's notary block prefers the API key form.)
+#
+# Then: expose all five as env vars on the `goreleaser` step in release.yml,
+# uncomment the block below, and note that `notarize.macos` signs binaries
+# produced by a GoReleaser BUILD -- with the prebuilt/meta-archive layout used
+# here you must either move to `builds: builder: prebuilt` (Pro) or sign the
+# .app in the macOS matrix job with `codesign`/`xcrun notarytool` before upload,
+# which is usually the simpler path for a Wails .app bundle.
+#
+# notarize:
+#   macos:
+#     - enabled: '{{ isEnvSet "MACOS_SIGN_P12" }}'
+#       ids:
+#         - computer-pruner
+#       sign:
+#         certificate: "{{ .Env.MACOS_SIGN_P12 }}"
+#         password: "{{ .Env.MACOS_SIGN_PASSWORD }}"
+#       notarize:
+#         issuer_id: "{{ .Env.MACOS_NOTARY_ISSUER_ID }}"
+#         key_id: "{{ .Env.MACOS_NOTARY_KEY_ID }}"
+#         key: "{{ .Env.MACOS_NOTARY_KEY }}"
+#         wait: true
+#         timeout: 30m
+# ============================================================================
+
+snapshot:
+  # v2 renamed this from `name_template`. Used only by
+  # `goreleaser release --snapshot`, never on a real tag.
+  version_template: "{{ incpatch .Version }}-SNAPSHOT-{{ .ShortCommit }}"

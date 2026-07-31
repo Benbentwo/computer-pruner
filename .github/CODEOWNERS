@@ -1,0 +1,7 @@
+# Code owners for ComputerPruner.
+#
+# Every path is owned by @Benbentwo, who is automatically requested for review on
+# any pull request. Later rules win, so add narrower paths below this line if
+# ownership is ever split up.
+
+* @Benbentwo

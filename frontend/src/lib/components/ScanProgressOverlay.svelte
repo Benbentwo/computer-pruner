@@ -1,9 +1,10 @@
 <script lang="ts">
   import { scanProgress, isScanning } from '../stores'
   import { formatBytes, formatPath, formatDuration } from '../utils/format'
+  import { cancelScan } from '../utils/wailsBindings'
 
-  function handleCancel() {
-    // TODO: Dispatch cancel event to backend
+  async function handleCancel() {
+    await cancelScan()
     isScanning.set(false)
   }
 </script>
@@ -16,7 +17,7 @@
     </div>
 
     <!-- Progress Info -->
-    <h2>Scanning...</h2>
+    <h2>Scanning…</h2>
 
     {#if $scanProgress}
       <div class="progress-info">
@@ -47,6 +48,8 @@
           <div class="progress-bar" />
         </div>
       </div>
+    {:else}
+      <p class="text-secondary text-sm">Preparing scan…</p>
     {/if}
 
     <!-- Cancel Button -->
@@ -63,25 +66,38 @@
     left: 0;
     right: 0;
     bottom: 0;
-    background-color: rgba(0, 0, 0, 0.7);
+    background-color: rgba(0, 0, 0, 0.75);
     display: flex;
     align-items: center;
     justify-content: center;
     z-index: 1000;
+    backdrop-filter: blur(4px);
+    animation: fadeIn 200ms ease;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
   }
 
   .progress-modal {
     background-color: var(--bg-secondary);
     border: 1px solid var(--border);
-    border-radius: 8px;
+    border-radius: 12px;
     padding: 2em;
-    max-width: 400px;
+    max-width: 420px;
     width: 90%;
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 1.5em;
-    box-shadow: 0 10px 40px rgba(0, 0, 0, 0.5);
+    gap: 1.25em;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.6);
+    animation: slideUp 300ms ease;
+  }
+
+  @keyframes slideUp {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
   }
 
   .spinner-container {
@@ -91,85 +107,85 @@
   }
 
   .spinner {
-    width: 48px;
-    height: 48px;
+    width: 44px;
+    height: 44px;
     border: 3px solid var(--border);
     border-top-color: var(--accent);
     border-radius: 50%;
-    animation: spin 1s linear infinite;
+    animation: spin 0.8s linear infinite;
   }
 
   @keyframes spin {
-    to {
-      transform: rotate(360deg);
-    }
+    to { transform: rotate(360deg); }
   }
 
   h2 {
     margin: 0;
     text-align: center;
     color: var(--text-primary);
+    font-size: 1.2em;
   }
 
   .progress-info {
     width: 100%;
     display: flex;
     flex-direction: column;
-    gap: 1em;
+    gap: 0.75em;
   }
 
   .progress-stat {
     display: flex;
     flex-direction: column;
-    gap: 0.25em;
+    gap: 0.15em;
   }
 
   .stat-label {
-    font-size: 0.8em;
-    color: var(--text-secondary);
+    font-size: 0.75em;
+    color: var(--text-tertiary);
     font-weight: 500;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
   }
 
   .stat-value {
-    font-size: 1em;
+    font-size: 0.95em;
     color: var(--text-primary);
     font-weight: 600;
   }
 
   .stat-value.path {
-    font-family: 'Monaco', 'Courier New', monospace;
-    font-size: 0.85em;
+    font-family: 'SF Mono', 'Monaco', 'Courier New', monospace;
+    font-size: 0.8em;
     word-break: break-all;
+    font-weight: 500;
+    color: var(--text-secondary);
   }
 
   .progress-bar-container {
     width: 100%;
-    height: 4px;
+    height: 3px;
     background-color: var(--bg-tertiary);
     border-radius: 2px;
     overflow: hidden;
+    margin-top: 0.25em;
   }
 
   .progress-bar {
     height: 100%;
     background: linear-gradient(90deg, var(--accent), var(--accent-hover));
-    animation: progress 2s ease-in-out infinite;
+    animation: indeterminate 1.5s ease-in-out infinite;
+    width: 40%;
+    border-radius: 2px;
   }
 
-  @keyframes progress {
-    0% {
-      width: 0%;
-    }
-    50% {
-      width: 100%;
-    }
-    100% {
-      width: 0%;
-    }
+  @keyframes indeterminate {
+    0% { transform: translateX(-100%); }
+    100% { transform: translateX(350%); }
   }
 
   .cancel-btn {
     align-self: center;
-    padding: 0.65em 1.5em;
+    padding: 0.6em 1.5em;
+    margin-top: 0.25em;
   }
 </style>

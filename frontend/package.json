@@ -1,5 +1,5 @@
 {
-  "name": "diskanalyzer-frontend",
+  "name": "computer-pruner-frontend",
   "private": true,
   "version": "1.0.0",
   "type": "module",
@@ -10,16 +10,20 @@
     "check": "svelte-check --tsconfig ./tsconfig.json"
   },
   "devDependencies": {
-    "@sveltejs/vite-plugin-svelte": "^3.0.0",
-    "@tsconfig/svelte": "^5.0.0",
-    "svelte": "^4.2.0",
-    "svelte-check": "^3.6.0",
-    "tslib": "^2.6.0",
-    "typescript": "^5.3.0",
-    "vite": "^5.0.0"
+    "@sveltejs/vite-plugin-svelte": "^3.1.2",
+    "@tsconfig/svelte": "^5.0.8",
+    "svelte": "^4.2.20",
+    "svelte-check": "^4.7.4",
+    "tslib": "^2.8.1",
+    "typescript": "^5.9.3",
+    "vite": "^6.4.3"
   },
   "dependencies": {
-    "d3": "^7.9.0",
-    "@types/d3": "^7.4.0"
+    "@types/d3": "^7.4.3",
+    "d3": "^7.9.0"
+  },
+  "overrides": {
+    "postcss": "^8.5.25",
+    "vite": "$vite"
   }
 }

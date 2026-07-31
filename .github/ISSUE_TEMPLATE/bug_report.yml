@@ -1,0 +1,105 @@
+name: Bug report
+description: Something in ComputerPruner behaves incorrectly.
+title: "[Bug]: "
+labels:
+  - bug
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for taking the time to file a bug.
+
+        ### Before you attach anything: check for private paths
+
+        ComputerPruner's whole job is to display your filesystem as a tree, so
+        **screenshots, log excerpts and copied paths routinely leak directory
+        names you may not want public** — client names, employer names,
+        unreleased project names, real names in `/Users/<you>`, and so on.
+
+        GitHub issues are public and effectively permanent: editing or deleting
+        an attachment later does not reliably remove it.
+
+        Please crop or redact before you paste. A synthetic path like
+        `/Users/example/Projects/redacted` is almost always enough for us to
+        reproduce the bug.
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      description: ComputerPruner ships for macOS and Windows only.
+      options:
+        - macOS
+        - Windows
+    validations:
+      required: true
+  - type: input
+    id: os-version
+    attributes:
+      label: OS version
+      description: e.g. "macOS 15.2 (Apple Silicon)" or "Windows 11 23H2 (amd64)".
+      placeholder: macOS 15.2 (Apple Silicon)
+    validations:
+      required: true
+  - type: input
+    id: app-version
+    attributes:
+      label: ComputerPruner version
+      description: >-
+        The release tag you installed, or the commit SHA if you built from
+        source.
+      placeholder: v0.1.0
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: >-
+        Numbered steps, starting from launching the app. Redact any real
+        directory names as you go.
+      placeholder: |
+        1. Launch ComputerPruner
+        2. Select the volume "Macintosh HD"
+        3. Scan a folder containing roughly 200k files
+        4. Click a segment in the sunburst chart
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behaviour
+      description: What you thought would happen.
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behaviour
+      description: >-
+        What happened instead. Include any error text, and screenshots only
+        after redacting private paths.
+    validations:
+      required: true
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: >-
+        Anything else worth knowing — drive type (internal/external/network),
+        filesystem (APFS, NTFS, exFAT), approximate size of the scanned tree.
+    validations:
+      required: false
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check
+      options:
+        - label: >-
+            I have reviewed everything I am about to post — screenshots
+            included — and it contains no file paths, folder names or
+            usernames I would mind being public forever.
+          required: true
+        - label: >-
+            I searched existing issues and this does not appear to be a
+            duplicate.
+          required: false
