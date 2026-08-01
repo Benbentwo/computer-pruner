@@ -76,14 +76,14 @@ jobs:
             platform: windows/arm64
             artifact: prebuilt-windows-arm64
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7
         with:
           node-version: ${{ env.NODE_VERSION }}
           cache: npm
@@ -169,13 +169,13 @@ jobs:
       # assets to it.
       contents: write
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           # GoReleaser derives the version from the tag and needs the full tag
           # history to do it.
           fetch-depth: 0
 
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v7
         with:
           go-version: ${{ env.GO_VERSION }}
           cache: true
@@ -209,27 +209,61 @@ jobs:
           test -f dist-prebuilt/windows_arm64/computer-pruner.exe
           find dist-prebuilt -maxdepth 3 -print
 
-      # .goreleaser.yaml sets `use_existing_draft: true` and
-      # `mode: keep-existing` with the changelog disabled, so the release body
-      # comes entirely from the Release Drafter draft. If no draft exists for
-      # this tag, GoReleaser falls through to CreateRelease with an empty body
-      # and exits 0 — a published, latest-tagged, completely blank release.
-      # Fail here instead, while the tag can still be deleted and re-pushed.
-      - name: Require a Release Drafter draft for this tag
+      # .goreleaser.yaml sets `use_existing_draft: true` and `mode: keep-existing`
+      # with its own changelog disabled, so the release body comes from a draft
+      # rather than from GoReleaser. Without a draft, GoReleaser would create the
+      # release with an empty body and exit 0 — a published, latest-tagged,
+      # completely blank release.
+      #
+      # This step guarantees a draft exists, rather than failing when one does not.
+      # Three cases:
+      #
+      #   1. Release Drafter already has a draft for this exact tag  -> use it.
+      #   2. Release Drafter has a draft under a DIFFERENT tag (its version
+      #      resolver defaults to v1.0.0 on a repo with no prior release, which
+      #      will not match a v0.x tag) -> retag that draft onto this tag, so the
+      #      accumulated notes are not thrown away.
+      #   3. No draft at all — the usual case for a first release, where nothing
+      #      has been merged via PR yet -> create one with --generate-notes.
+      #
+      # In every case GoReleaser finds a draft with a real body and adopts it.
+      # An earlier version of this step hard-failed on case 3, which blocked the
+      # first release of this repository even though all three build jobs had
+      # succeeded. Refusing to publish a blank release is right; refusing to
+      # publish at all is not.
+      - name: Ensure a release draft exists for this tag
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
-          if ! gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null | grep -qx true; then
-            echo "::error::No draft release exists for tag ${tag}." >&2
-            echo "Release Drafter maintains the draft on every merge to main. Check that" >&2
-            echo "the draft's tag matches this one exactly, then re-push the tag." >&2
+
+          if gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null | grep -qx true; then
+            echo "Draft already exists for ${tag}; GoReleaser will adopt it."
+            exit 0
+          fi
+
+          if gh release view "$tag" >/dev/null 2>&1; then
+            echo "::error::A PUBLISHED release already exists for ${tag}." >&2
+            echo "Refusing to overwrite it. Delete it first, or tag a new version." >&2
             exit 1
           fi
 
+          # Case 2: adopt an existing draft that is sitting under another tag.
+          other="$(gh release list --limit 30 --json tagName,isDraft \
+                     --jq '[.[] | select(.isDraft) | .tagName][0] // empty')"
+          if [ -n "$other" ]; then
+            echo "Retagging existing draft '${other}' onto '${tag}'."
+            gh release edit "$other" --tag "$tag" --title "$tag" --draft
+            exit 0
+          fi
+
+          # Case 3: nothing to adopt — synthesise notes from the commit log.
+          echo "No draft found. Creating one for ${tag} with generated notes."
+          gh release create "$tag" --draft --title "$tag" --generate-notes
+
       - name: Run GoReleaser
-        uses: goreleaser/goreleaser-action@v6
+        uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: '~> v2'

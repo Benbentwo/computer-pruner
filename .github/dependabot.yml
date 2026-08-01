@@ -6,8 +6,11 @@
 #   github-actions (/)          — action versions pinned in .github/workflows
 #
 # Minor and patch bumps are grouped into a single PR per ecosystem to keep review
-# noise down; majors stay ungrouped so each breaking bump gets its own PR and its
-# own CI run.
+# noise down. Majors are grouped too, but separately: the first push of this repo
+# produced eight simultaneous PRs because every major arrived on its own, which is
+# more triage than a solo maintainer wants on day one. Grouping majors still keeps
+# them off the minor/patch PR, so a breaking bump never rides along with a routine
+# one — it just shares a PR with other breaking bumps in the same ecosystem.
 #
 # Commit prefixes are "deps" / "deps-dev" so the release-drafter autolabeler can
 # classify these PRs from the title alone.
@@ -38,6 +41,10 @@ updates:
         update-types:
           - minor
           - patch
+      go-major:
+        applies-to: version-updates
+        update-types:
+          - major
 
   # ---------------------------------------------------------------------------
   # Frontend npm packages
@@ -58,12 +65,36 @@ updates:
     commit-message:
       prefix: deps
       prefix-development: deps-dev
+    # Svelte 5 is a coordinated migration, not a dependency bump.
+    #
+    # svelte 5, @sveltejs/vite-plugin-svelte 7 and vite 8 are a matched set:
+    # vite-plugin-svelte@7 peers `svelte ^5.46.4` and `vite ^8`, so taking any one
+    # of them alone puts the tree off a supported matrix even when CI passes.
+    # typescript 7 is outside svelte-check@4's peer range (`^5 || ^6`) for the same
+    # reason. All four are ignored at the major level until the eight Svelte 4
+    # components are migrated to runes, at which point they move together in one PR
+    # and these ignores come out.
+    #
+    # Minor and patch updates within the current majors still flow normally.
+    ignore:
+      - dependency-name: svelte
+        update-types: [version-update:semver-major]
+      - dependency-name: "@sveltejs/vite-plugin-svelte"
+        update-types: [version-update:semver-major]
+      - dependency-name: vite
+        update-types: [version-update:semver-major]
+      - dependency-name: typescript
+        update-types: [version-update:semver-major]
     groups:
       npm-minor-and-patch:
         applies-to: version-updates
         update-types:
           - minor
           - patch
+      npm-major:
+        applies-to: version-updates
+        update-types:
+          - major
 
   # ---------------------------------------------------------------------------
   # GitHub Actions
@@ -86,3 +117,7 @@ updates:
         update-types:
           - minor
           - patch
+      actions-major:
+        applies-to: version-updates
+        update-types:
+          - major
