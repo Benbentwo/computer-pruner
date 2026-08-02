@@ -103,3 +103,16 @@ Desktop.ini
 # personal path to a private dotfiles repo before. The rest of .claude/ (notably
 # .claude/rules/) is shared project config and stays tracked.
 .claude/settings.local.json
+
+# Release pipeline scratch (CI only)
+#
+# GoReleaser refuses to run against a dirty worktree, and the release workflow
+# creates all three of these inside the checkout before invoking it:
+#   artifacts/        raw per-matrix downloads from actions/download-artifact
+#   dist-prebuilt/    the restaged layout .goreleaser.yaml's archives point at
+#   release-notes.md  the body handed to --release-notes
+# Leaving them untracked made `git status` non-empty and aborted the release
+# after all three build jobs had already succeeded. Ignoring them is the fix.
+artifacts/
+dist-prebuilt/
+release-notes.md

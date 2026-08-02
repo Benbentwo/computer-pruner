@@ -184,17 +184,20 @@ release:
   # tagged release is the output, and it goes out live.
   draft: false
 
-  # NOTE: `use_existing_draft: true` + `mode: keep-existing` used to live here so
-  # Release Drafter could own the body in place. That combination broke the
-  # v0.1.0 release: GitHub's API rejects `make_latest` on a *draft* release, so
-  # GoReleaser exited 1 at publish time -- after all three build jobs had already
-  # produced good artifacts -- leaving a release with no binaries attached.
+  # `use_existing_draft: true` + `mode: keep-existing` used to live here so
+  # Release Drafter could own the release body in place. The body now arrives
+  # via `--release-notes` instead: the workflow extracts it from the Release
+  # Drafter draft, deletes that draft, and hands GoReleaser a file. That keeps
+  # the curated changelog while letting GoReleaser create and publish a normal
+  # release, and it also covers the first-release case where no draft exists at
+  # all.
   #
-  # The body now arrives via `--release-notes`, which the workflow extracts from
-  # the Release Drafter draft (falling back to GitHub's generated notes). That
-  # keeps the curated changelog while letting GoReleaser create and publish a
-  # normal, non-draft release. Do not reintroduce draft adoption here without
-  # also removing `make_latest`.
+  # For the record, because an earlier comment here got this wrong: draft
+  # adoption was NOT what broke the v0.1.0 release. That failure was
+  # `goreleaser: git is in a dirty state` -- the workflow writes artifacts/,
+  # dist-prebuilt/ and release-notes.md into the checkout, none of which were
+  # gitignored, and GoReleaser refuses to run against a dirty worktree. See the
+  # "Release pipeline scratch" block in /.gitignore, which is the actual fix.
 
   # v1.0.0-rc1 / v2.0.0-beta.2 are flagged as pre-releases automatically;
   # v1.0.0 is not.

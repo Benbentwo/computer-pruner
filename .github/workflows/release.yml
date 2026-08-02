@@ -213,12 +213,15 @@ jobs:
 
       # Resolve the release body, then get out of GoReleaser's way.
       #
-      # GoReleaser CREATES and PUBLISHES the release (see .goreleaser.yaml). It no
-      # longer adopts a draft: GitHub's API rejects `make_latest` on a draft, which
-      # is what killed the v0.1.0 run at publish time with three good builds already
-      # in hand. So this step extracts whatever notes exist into a file, deletes the
-      # draft so the tag is free, and GoReleaser is handed the text via
+      # GoReleaser CREATES and PUBLISHES the release (see .goreleaser.yaml) rather
+      # than adopting a draft. This step extracts whatever notes exist into a file,
+      # deletes the draft so the tag is free, and GoReleaser is handed the text via
       # --release-notes.
+      #
+      # NOTE: release-notes.md, artifacts/ and dist-prebuilt/ are all gitignored.
+      # They must stay that way. GoReleaser aborts with "git is in a dirty state"
+      # if anything in the checkout is untracked, which is exactly how the v0.1.0
+      # release failed after all three build jobs had already succeeded.
       #
       #   1. Draft on this exact tag                -> take its body, delete it.
       #   2. Draft on another tag (Release Drafter's resolver defaults to v1.0.0 on
