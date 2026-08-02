@@ -236,14 +236,14 @@ template: |
 
   | Platform | File |
   | --- | --- |
-  | macOS (Apple Silicon + Intel) | `computer-pruner_$RESOLVED_VERSION_darwin_universal.zip` |
-  | Windows (x64) | `computer-pruner_$RESOLVED_VERSION_windows_amd64.zip` |
-  | Windows (ARM64) | `computer-pruner_$RESOLVED_VERSION_windows_arm64.zip` |
+  | macOS (Apple Silicon + Intel) | `computer-pruner_${RESOLVED_VERSION}_darwin_universal.zip` |
+  | Windows (x64) | `computer-pruner_${RESOLVED_VERSION}_windows_amd64.zip` |
+  | Windows (ARM64) | `computer-pruner_${RESOLVED_VERSION}_windows_arm64.zip` |
 
-  Verify a download against `computer-pruner_$RESOLVED_VERSION_checksums.txt`:
+  Verify a download against `computer-pruner_${RESOLVED_VERSION}_checksums.txt`:
 
   ```
-  shasum -a 256 -c computer-pruner_$RESOLVED_VERSION_checksums.txt --ignore-missing
+  shasum -a 256 -c computer-pruner_${RESOLVED_VERSION}_checksums.txt --ignore-missing
   ```
 
   > **These builds are unsigned and un-notarized.**

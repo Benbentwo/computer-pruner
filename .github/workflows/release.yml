@@ -14,9 +14,11 @@
 # GoReleaser compiles nothing here. See the long header comment in
 # /.goreleaser.yaml for why there is no normal `builds:` block.
 #
-# Release notes come from Release Drafter (see release-drafter.yml), not from
-# GoReleaser. Tag exactly the version Release Drafter resolved on its draft
-# (`v$RESOLVED_VERSION`) or the published release body will be empty.
+# Release notes come from Release Drafter (see release-drafter.yml) when a draft
+# exists, and from GitHub's generated notes otherwise. The `Resolve release
+# notes` step below reconciles the two and hands GoReleaser a file, so the tag
+# no longer has to match Release Drafter's resolved version -- an earlier
+# revision required that and blocked the first two release attempts.
 #
 # To cut a release:
 #   git tag -a v1.2.3 -m 'v1.2.3' && git push origin v1.2.3
@@ -209,65 +211,68 @@ jobs:
           test -f dist-prebuilt/windows_arm64/computer-pruner.exe
           find dist-prebuilt -maxdepth 3 -print
 
-      # .goreleaser.yaml sets `use_existing_draft: true` and `mode: keep-existing`
-      # with its own changelog disabled, so the release body comes from a draft
-      # rather than from GoReleaser. Without a draft, GoReleaser would create the
-      # release with an empty body and exit 0 — a published, latest-tagged,
-      # completely blank release.
+      # Resolve the release body, then get out of GoReleaser's way.
       #
-      # This step guarantees a draft exists, rather than failing when one does not.
-      # Three cases:
+      # GoReleaser CREATES and PUBLISHES the release (see .goreleaser.yaml). It no
+      # longer adopts a draft: GitHub's API rejects `make_latest` on a draft, which
+      # is what killed the v0.1.0 run at publish time with three good builds already
+      # in hand. So this step extracts whatever notes exist into a file, deletes the
+      # draft so the tag is free, and GoReleaser is handed the text via
+      # --release-notes.
       #
-      #   1. Release Drafter already has a draft for this exact tag  -> use it.
-      #   2. Release Drafter has a draft under a DIFFERENT tag (its version
-      #      resolver defaults to v1.0.0 on a repo with no prior release, which
-      #      will not match a v0.x tag) -> retag that draft onto this tag, so the
-      #      accumulated notes are not thrown away.
-      #   3. No draft at all — the usual case for a first release, where nothing
-      #      has been merged via PR yet -> create one with --generate-notes.
+      #   1. Draft on this exact tag                -> take its body, delete it.
+      #   2. Draft on another tag (Release Drafter's resolver defaults to v1.0.0 on
+      #      a repo with no prior release, which never matches a v0.x tag)
+      #                                             -> take its body, delete it.
+      #   3. No draft (the normal first-release case) -> ask GitHub to generate notes.
       #
-      # In every case GoReleaser finds a draft with a real body and adopts it.
-      # An earlier version of this step hard-failed on case 3, which blocked the
-      # first release of this repository even though all three build jobs had
-      # succeeded. Refusing to publish a blank release is right; refusing to
-      # publish at all is not.
-      - name: Ensure a release draft exists for this tag
+      # A PUBLISHED release on this tag is still refused rather than overwritten.
+      - name: Resolve release notes
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           tag="${GITHUB_REF_NAME}"
 
-          if gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null | grep -qx true; then
-            echo "Draft already exists for ${tag}; GoReleaser will adopt it."
-            exit 0
-          fi
-
-          if gh release view "$tag" >/dev/null 2>&1; then
-            echo "::error::A PUBLISHED release already exists for ${tag}." >&2
-            echo "Refusing to overwrite it. Delete it first, or tag a new version." >&2
+          if gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null | grep -qx false; then
+            echo "::error::A published release already exists for ${tag}; refusing to overwrite." >&2
             exit 1
           fi
 
-          # Case 2: adopt an existing draft that is sitting under another tag.
-          other="$(gh release list --limit 30 --json tagName,isDraft \
+          src=""
+          if gh release view "$tag" --json isDraft --jq '.isDraft' 2>/dev/null | grep -qx true; then
+            src="$tag"
+          else
+            src="$(gh release list --limit 30 --json tagName,isDraft \
                      --jq '[.[] | select(.isDraft) | .tagName][0] // empty')"
-          if [ -n "$other" ]; then
-            echo "Retagging existing draft '${other}' onto '${tag}'."
-            gh release edit "$other" --tag "$tag" --title "$tag" --draft
-            exit 0
           fi
 
-          # Case 3: nothing to adopt — synthesise notes from the commit log.
-          echo "No draft found. Creating one for ${tag} with generated notes."
-          gh release create "$tag" --draft --title "$tag" --generate-notes
+          if [ -n "$src" ]; then
+            echo "Taking release notes from draft '${src}'."
+            gh release view "$src" --json body --jq '.body' > release-notes.md
+            gh release delete "$src" --yes
+          else
+            echo "No draft found; generating notes from the commit log."
+            gh api "repos/${GITHUB_REPOSITORY}/releases/generate-notes" \
+              -f tag_name="$tag" --jq '.body' > release-notes.md
+          fi
+
+          # Release Drafter substitutes $RESOLVED_VERSION only when it is not
+          # followed by a word character, so "..._$RESOLVED_VERSION_darwin..." comes
+          # through literally. Patch any survivors rather than shipping them.
+          sed -i "s/\$RESOLVED_VERSION/${tag#v}/g" release-notes.md
+
+          if [ ! -s release-notes.md ]; then
+            echo "Release ${tag}." > release-notes.md
+          fi
+          echo "----- release notes -----"; cat release-notes.md
 
       - name: Run GoReleaser
         uses: goreleaser/goreleaser-action@v7
         with:
           distribution: goreleaser
           version: '~> v2'
-          args: release --clean
+          args: release --clean --release-notes=release-notes.md
         env:
           # The default job token is enough: contents:write above covers
           # creating the release and uploading assets.

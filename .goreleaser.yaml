@@ -184,12 +184,17 @@ release:
   # tagged release is the output, and it goes out live.
   draft: false
 
-  # Adopt the draft Release Drafter has been maintaining instead of creating a
-  # second, empty release next to it.
-  use_existing_draft: true
-
-  # Keep Release Drafter's curated notes verbatim. See the block above.
-  mode: keep-existing
+  # NOTE: `use_existing_draft: true` + `mode: keep-existing` used to live here so
+  # Release Drafter could own the body in place. That combination broke the
+  # v0.1.0 release: GitHub's API rejects `make_latest` on a *draft* release, so
+  # GoReleaser exited 1 at publish time -- after all three build jobs had already
+  # produced good artifacts -- leaving a release with no binaries attached.
+  #
+  # The body now arrives via `--release-notes`, which the workflow extracts from
+  # the Release Drafter draft (falling back to GitHub's generated notes). That
+  # keeps the curated changelog while letting GoReleaser create and publish a
+  # normal, non-draft release. Do not reintroduce draft adoption here without
+  # also removing `make_latest`.
 
   # v1.0.0-rc1 / v2.0.0-beta.2 are flagged as pre-releases automatically;
   # v1.0.0 is not.
