@@ -121,7 +121,7 @@ jobs:
       # Coverage is uploaded as a plain artifact rather than pushed to Codecov: there is
       # no token to hand out, and a token-less uploader turns every fork PR red.
       - name: Upload coverage
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: coverage
           path: coverage.out
@@ -283,7 +283,7 @@ jobs:
       # upload-artifact, which drops POSIX exec bits -- fine for inspection, not for
       # double-click distribution.
       - name: Upload build artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: ${{ matrix.artifact }}
           path: build/bin/
