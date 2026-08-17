@@ -5,10 +5,10 @@ go 1.25.0
 toolchain go1.25.12
 
 require (
-	github.com/wailsapp/wails/v2 v2.13.0
+	github.com/wailsapp/wails/v2 v2.14.0
 	go.etcd.io/bbolt v1.5.0
 	golang.org/x/sys v0.47.0
-	golang.org/x/text v0.40.0
+	golang.org/x/text v0.41.0
 )
 
 require (
